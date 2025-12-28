@@ -33,7 +33,7 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 - **Frontend**: SvelteKit 2, Svelte 5, shadcn-svelte, TailwindCSS
 - **Backend**: Bun runtime with SvelteKit API routes
 - **Database**: SQLite or PostgreSQL via Drizzle ORM
-- **Docker**: Dockerode library
+- **Docker**: direct docker API calls.
 
 ## License
 
