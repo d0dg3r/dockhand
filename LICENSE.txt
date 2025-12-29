@@ -123,6 +123,6 @@ under an Open Source License, as stated in this License.
 
 For licensing inquiries, commercial licensing, or enterprise features:
 
-  Website: https://dockhand.io
+  Website: https://dockhand.pro
 
 -----------------------------------------------------------------------------
