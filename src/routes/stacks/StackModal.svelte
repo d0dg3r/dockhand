@@ -35,19 +35,19 @@
 	let loadError = $state<string | null>(null);
 	let errors = $state<{ stackName?: string; compose?: string }>({});
 	let composeContent = $state('');
-	let originalContent = $state('');
 	let activeTab = $state<'editor' | 'graph'>('editor');
 	let showConfirmClose = $state(false);
 	let editorTheme = $state<'light' | 'dark'>('dark');
 
 	// Environment variables state
 	let envVars = $state<EnvVar[]>([]);
-	let originalEnvVars = $state<EnvVar[]>([]);
 	let rawEnvContent = $state('');
-	let originalRawEnvContent = $state('');
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
 	let existingSecretKeys = $state<Set<string>>(new Set());
+
+	// Simple dirty flag - only set when user touches something
+	let isDirty = $state(false);
 
 	// CodeEditor reference for explicit marker updates
 	let codeEditorRef: CodeEditor | null = $state(null);
@@ -140,12 +140,10 @@ services:
 		return markers;
 	});
 
-	// Check for compose changes
-	const hasComposeChanges = $derived(composeContent !== originalContent);
-
 	// Stable callback for compose content changes - avoids stale closure issues
 	function handleComposeChange(value: string) {
 		composeContent = value;
+		isDirty = true;
 		debouncedValidate();
 	}
 
@@ -163,16 +161,10 @@ services:
 		codeEditorRef.updateVariableMarkers(variableMarkers, true);
 	}
 
-	// Check for env var changes (compare by serializing)
-	const hasEnvVarChanges = $derived.by(() => {
-		const currentVars = JSON.stringify(envVars.filter(v => v.key));
-		const originalVars = JSON.stringify(originalEnvVars);
-		const varsChanged = currentVars !== originalVars;
-		const rawChanged = rawEnvContent !== originalRawEnvContent;
-		return varsChanged || rawChanged;
-	});
-
-	const hasChanges = $derived(hasComposeChanges || hasEnvVarChanges);
+	// Mark dirty when env vars change
+	function markDirty() {
+		isDirty = true;
+	}
 
 	// Display title
 	const displayName = $derived(mode === 'edit' ? stackName : (newStackName || 'New stack'));
@@ -247,7 +239,6 @@ services:
 			}
 
 			composeContent = data.content;
-			originalContent = data.content;
 
 			// Load environment variables (parsed)
 			const envResponse = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env`, envId));
@@ -268,10 +259,9 @@ services:
 			}
 
 			// Wait for $effects in StackEnvVarsPanel to settle (parses raw content, syncs variables)
-			// Then set originals to the post-effect state to avoid false "unsaved changes"
 			await tick();
-			originalEnvVars = JSON.parse(JSON.stringify(envVars.filter(v => v.key.trim())));
-			originalRawEnvContent = rawEnvContent;
+			// Reset dirty flag after loading completes
+			isDirty = false;
 		} catch (e: any) {
 			loadError = e.message;
 		} finally {
@@ -418,8 +408,8 @@ services:
 				contentToSave = definedVars.map(v => `${v.key.trim()}=${v.value}`).join('\n') + '\n';
 			}
 
-			// Save if there's any content OR if we need to clear an existing file
-			if (contentToSave.trim() || originalRawEnvContent.trim() || definedVars.length > 0 || originalEnvVars.length > 0) {
+			// Save if there's any content
+			if (contentToSave.trim() || definedVars.length > 0) {
 				const rawEnvResponse = await fetch(
 					appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env/raw`, envId),
 					{
@@ -456,10 +446,8 @@ services:
 				}
 			}
 
-			originalContent = composeContent;
-			originalEnvVars = JSON.parse(JSON.stringify(envVars.filter(v => v.key.trim())));
-			originalRawEnvContent = contentToSave; // Use what was actually saved
 			rawEnvContent = contentToSave; // Sync raw content if it was generated
+			isDirty = false; // Reset dirty flag after successful save
 			onSuccess();
 
 			if (!restart) {
@@ -476,7 +464,7 @@ services:
 	}
 
 	function tryClose() {
-		if (hasChanges) {
+		if (isDirty) {
 			showConfirmClose = true;
 		} else {
 			handleClose();
@@ -495,12 +483,10 @@ services:
 		loadError = null;
 		errors = {};
 		composeContent = '';
-		originalContent = '';
 		envVars = [];
-		originalEnvVars = [];
 		rawEnvContent = '';
-		originalRawEnvContent = '';
 		envValidation = null;
+		isDirty = false;
 		existingSecretKeys = new Set();
 		activeTab = 'editor';
 		showConfirmClose = false;
@@ -526,7 +512,7 @@ services:
 			} else if (mode === 'create') {
 				// Set default compose content for create mode
 				composeContent = defaultCompose;
-				originalContent = defaultCompose; // Track original for change detection
+				isDirty = false; // Reset dirty flag for new modal
 				loading = false;
 				// Auto-validate default compose
 				validateEnvVars();
@@ -558,7 +544,7 @@ services:
 			focusFirstInput();
 		} else {
 			// Prevent closing if there are unsaved changes - show confirmation instead
-			if (hasChanges) {
+			if (isDirty) {
 				// Re-open the dialog and show confirmation
 				open = true;
 				showConfirmClose = true;
@@ -775,7 +761,7 @@ services:
 									bind:rawContent={rawEnvContent}
 									validation={envValidation}
 									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
-									onchange={debouncedValidate}
+									onchange={() => { markDirty(); debouncedValidate(); }}
 								/>
 							</div>
 						</div>
@@ -795,7 +781,7 @@ services:
 		<!-- Footer -->
 		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
 			<div class="text-xs text-zinc-500 dark:text-zinc-400">
-				{#if hasChanges}
+				{#if isDirty}
 					<span class="text-amber-600 dark:text-amber-500">Unsaved changes</span>
 				{:else}
 					No changes
@@ -829,7 +815,7 @@ services:
 					</Button>
 				{:else}
 					<!-- Edit mode buttons -->
-					<Button variant="outline" onclick={() => handleSave(false)} disabled={saving || !hasChanges || loading || !!loadError}>
+					<Button variant="outline" onclick={() => handleSave(false)} disabled={saving || loading || !!loadError}>
 						{#if saving}
 							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 							Saving...
@@ -838,7 +824,7 @@ services:
 							Save
 						{/if}
 					</Button>
-					<Button onclick={() => handleSave(true)} disabled={saving || !hasChanges || loading || !!loadError}>
+					<Button onclick={() => handleSave(true)} disabled={saving || loading || !!loadError}>
 						{#if saving}
 							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 							Applying...

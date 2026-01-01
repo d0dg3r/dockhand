@@ -383,6 +383,7 @@
 				{sources}
 				{placeholder}
 				{existingSecretKeys}
+				{onchange}
 			/>
 		{:else}
 			<CodeEditor

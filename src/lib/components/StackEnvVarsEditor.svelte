@@ -27,6 +27,7 @@
 		sources?: Record<string, 'file' | 'override'>; // Key -> source mapping
 		placeholder?: { key: string; value: string };
 		existingSecretKeys?: Set<string>; // Keys of secrets loaded from DB (can't toggle visibility)
+		onchange?: () => void;
 	}
 
 	let {
@@ -36,7 +37,8 @@
 		showSource = false,
 		sources = {},
 		placeholder = { key: 'VARIABLE_NAME', value: 'value' },
-		existingSecretKeys = new Set<string>()
+		existingSecretKeys = new Set<string>(),
+		onchange
 	}: Props = $props();
 
 	// Check if a variable is an existing secret that was loaded from DB
@@ -46,14 +48,17 @@
 
 	function addVariable() {
 		variables = [...variables, { key: '', value: '', isSecret: false }];
+		onchange?.();
 	}
 
 	function removeVariable(index: number) {
 		variables = variables.filter((_, i) => i !== index);
+		onchange?.();
 	}
 
 	function toggleSecret(index: number) {
 		variables[index].isSecret = !variables[index].isSecret;
+		onchange?.();
 	}
 
 	// Check if a variable key is missing (required but not defined)
@@ -163,6 +168,7 @@
 					<Input
 						bind:value={variable.key}
 						disabled={readonly}
+						oninput={() => onchange?.()}
 						class="h-9 font-mono text-xs"
 					/>
 				</div>
@@ -174,6 +180,7 @@
 						bind:value={variable.value}
 						type={variable.isSecret ? 'password' : 'text'}
 						disabled={readonly}
+						oninput={() => onchange?.()}
 						class="h-9 font-mono text-xs"
 					/>
 				</div>
