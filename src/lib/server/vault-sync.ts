@@ -144,6 +144,9 @@ export async function syncStackSecrets(
 	let existingSecrets: Record<string, string> = {};
 	try {
 		existingSecrets = await getSecretEnvVarsAsRecord(stackName, resolvedEnvId);
+		// #region agent log
+		fetch('http://127.0.0.1:7244/ingest/82eed265-24ab-4eea-a445-5a08da005e0c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vault-sync.ts:146',message:'existingSecrets fetched',data:{stackName,resolvedEnvId,existingSecretsKeys:Object.keys(existingSecrets),count:Object.keys(existingSecrets).length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+		// #endregion
 	} catch (error) {
 		console.warn(`[Vault] Could not fetch existing secrets for comparison:`, error);
 		// Continue - we'll treat all secrets as new/changed
@@ -186,9 +189,17 @@ export async function syncStackSecrets(
 	const changedSecrets: string[] = [];
 	const triggerRedeploySecrets: string[] = [];
 
+	// #region agent log
+	fetch('http://127.0.0.1:7244/ingest/82eed265-24ab-4eea-a445-5a08da005e0c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vault-sync.ts:189',message:'triggerRedeployMap',data:{map:Object.fromEntries(triggerRedeployMap)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+	// #endregion
+
 	for (const secret of allSecrets) {
 		const oldValue = existingSecrets[secret.key];
 		const isChanged = oldValue === undefined || oldValue !== secret.value;
+
+		// #region agent log
+		fetch('http://127.0.0.1:7244/ingest/82eed265-24ab-4eea-a445-5a08da005e0c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vault-sync.ts:195',message:'secret comparison',data:{key:secret.key,oldValueExists:oldValue!==undefined,newValuePreview:secret.value?.substring(0,10),isChanged,triggerRedeploy:triggerRedeployMap.get(secret.key)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+		// #endregion
 
 		if (isChanged) {
 			changedSecrets.push(secret.key);
@@ -200,6 +211,9 @@ export async function syncStackSecrets(
 	}
 
 	const secretsChanged = changedSecrets.length > 0;
+	// #region agent log
+	fetch('http://127.0.0.1:7244/ingest/82eed265-24ab-4eea-a445-5a08da005e0c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vault-sync.ts:210',message:'sync result',data:{secretsChanged,changedSecrets,triggerRedeploySecrets},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+	// #endregion
 	if (secretsChanged) {
 		console.log(`[Vault] Detected ${changedSecrets.length} changed secrets for stack "${stackName}": ${changedSecrets.join(', ')}`);
 		if (triggerRedeploySecrets.length > 0) {
