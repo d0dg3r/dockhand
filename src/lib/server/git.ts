@@ -584,7 +584,8 @@ async function getPreviousCommit(repoPath: string, env: GitEnv): Promise<string 
 	}
 }
 
-export async function syncGitStack(stackId: number): Promise<SyncResult> {
+export async function syncGitStack(stackId: number, options?: { skipVault?: boolean }): Promise<SyncResult> {
+	const skipVault = options?.skipVault ?? false;
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
 		return { success: false, error: 'Git stack not found' };
@@ -754,26 +755,30 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			console.log(`${logPrefix} No env file path configured`);
 		}
 
-		// Sync secrets from Vault if .secrets.yaml exists
-		try {
-			const { syncStackSecrets } = await import('./vault-sync.js');
-			const vaultResult = await syncStackSecrets(gitStack.stackName, repoPath, gitStack.environmentId);
-			if (!vaultResult.skipped) {
-				if (vaultResult.success) {
-					console.log(`${logPrefix} Vault secrets synced: ${vaultResult.synced} secret(s)`);
-				} else {
-					console.warn(`${logPrefix} Vault sync had errors:`, vaultResult.errors.join(', '));
-				}
+		// Sync secrets from Vault if .secrets.yaml exists (unless skipVault is true)
+		if (skipVault) {
+			console.log(`${logPrefix} Skipping Vault sync (mode: git-only)`);
+		} else {
+			try {
+				const { syncStackSecrets } = await import('./vault-sync.js');
+				const vaultResult = await syncStackSecrets(gitStack.stackName, repoPath, gitStack.environmentId);
+				if (!vaultResult.skipped) {
+					if (vaultResult.success) {
+						console.log(`${logPrefix} Vault secrets synced: ${vaultResult.synced} secret(s)`);
+					} else {
+						console.warn(`${logPrefix} Vault sync had errors:`, vaultResult.errors.join(', '));
+					}
 
-				// Check if any secrets with triggerRedeploy changed
-				if (vaultResult.triggerRedeploySecrets.length > 0) {
-					console.log(`${logPrefix} Vault secrets changed (trigger redeploy): ${vaultResult.triggerRedeploySecrets.join(', ')}`);
-					updated = true;
+					// Check if any secrets with triggerRedeploy changed
+					if (vaultResult.triggerRedeploySecrets.length > 0) {
+						console.log(`${logPrefix} Vault secrets changed (trigger redeploy): ${vaultResult.triggerRedeploySecrets.join(', ')}`);
+						updated = true;
+					}
 				}
+			} catch (vaultError) {
+				// Don't fail the sync if Vault sync fails - just log and continue
+				console.warn(`${logPrefix} Vault sync error (non-fatal):`, vaultError);
 			}
-		} catch (vaultError) {
-			// Don't fail the sync if Vault sync fails - just log and continue
-			console.warn(`${logPrefix} Vault sync error (non-fatal):`, vaultError);
 		}
 
 		// Update git stack status

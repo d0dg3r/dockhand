@@ -62,6 +62,41 @@ sequenceDiagram
     end
 ```
 
+### Sync Mode Options
+
+The sync process can be triggered in three different modes:
+
+```mermaid
+flowchart TD
+    subgraph ui [UI Sync Buttons]
+        GitBtn["GitBranch - Sync Git Only"]
+        VaultBtn["KeyRound - Sync Vault Only"]
+        AllBtn["RefreshCw - Sync All"]
+    end
+    
+    subgraph api [API Endpoint]
+        GitAPI["/sync?mode=git"]
+        VaultAPI["/sync?mode=vault"]
+        AllAPI["/sync?mode=all"]
+    end
+    
+    subgraph backend [Backend Functions]
+        GitSync["syncGitStack(skipVault=true)"]
+        VaultSync["syncStackSecrets()"]
+        FullSync["syncGitStack() + syncStackSecrets()"]
+    end
+    
+    subgraph result [Results]
+        GitResult["Git changes only"]
+        VaultResult["Vault secrets updated"]
+        FullResult["Both synchronized"]
+    end
+    
+    GitBtn --> GitAPI --> GitSync --> GitResult
+    VaultBtn --> VaultAPI --> VaultSync --> VaultResult
+    AllBtn --> AllAPI --> FullSync --> FullResult
+```
+
 ## Configuration
 
 ### 1. Vault Settings (UI)
@@ -190,18 +225,38 @@ Secrets are automatically synchronized when:
 
 Via the API:
 ```bash
-curl -X POST http://localhost:5173/api/stacks/{stack-name}/secrets/sync
+curl -X POST http://localhost:3000/api/stacks/{stack-name}/secrets/sync
 ```
+
+### UI Sync Options
+
+For Git stacks, the Stacks page provides three separate sync buttons in the Actions column:
+
+| Icon | Color | Action | Description |
+|------|-------|--------|-------------|
+| GitBranch | Purple | Sync Git | Pull latest changes from Git repository only |
+| KeyRound | Cyan | Sync Vault | Fetch latest secrets from Vault only |
+| RefreshCw | Green | Sync All | Synchronize both Git and Vault (full sync) |
+
+**Use Cases:**
+
+- **Sync Git only**: When you've pushed code changes but Vault secrets haven't changed
+- **Sync Vault only**: When you've updated secrets in Vault but the Git repository hasn't changed
+- **Sync All**: For a complete synchronization of both sources
+
+Each button shows a spinner during the sync operation and displays a toast notification with the result.
 
 ### Test Connection
 
 ```bash
-curl -X POST http://localhost:5173/api/vault/fetch-test \
+curl -X POST http://localhost:3000/api/vault/fetch-test \
   -H "Content-Type: application/json" \
   -d '{"path": "secret/data", "keys": ["my_secret_key"]}'
 ```
 
 ## API Endpoints
+
+### Vault Configuration
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -210,7 +265,38 @@ curl -X POST http://localhost:5173/api/vault/fetch-test \
 | `/api/vault/config` | DELETE | Delete Vault configuration |
 | `/api/vault/test` | POST | Test connection |
 | `/api/vault/fetch-test` | POST | Test secret fetching |
-| `/api/stacks/[name]/secrets/sync` | POST | Sync secrets for a stack |
+| `/api/stacks/[name]/secrets/sync` | POST | Sync secrets for a specific stack |
+
+### Git Stack Sync (with Mode Parameter)
+
+The sync endpoint supports a `mode` query parameter for granular control:
+
+| Endpoint | Method | Mode | Description |
+|----------|--------|------|-------------|
+| `/api/git/stacks/[id]/sync` | POST | `git` | Sync Git repository only (skip Vault) |
+| `/api/git/stacks/[id]/sync` | POST | `vault` | Sync Vault secrets only (skip Git pull) |
+| `/api/git/stacks/[id]/sync` | POST | `all` | Sync both Git and Vault (default) |
+
+**Examples:**
+
+```bash
+# Sync only Git repository
+curl -X POST http://localhost:3000/api/git/stacks/1/sync?mode=git
+
+# Sync only Vault secrets
+curl -X POST http://localhost:3000/api/git/stacks/1/sync?mode=vault
+
+# Sync both (default behavior)
+curl -X POST http://localhost:3000/api/git/stacks/1/sync?mode=all
+curl -X POST http://localhost:3000/api/git/stacks/1/sync
+```
+
+**Response includes:**
+- `mode`: The sync mode used
+- `success`: Whether the sync succeeded
+- `updated`: Whether changes were detected
+- `deployed`: Whether an auto-deploy was triggered
+- For vault mode: `synced` (number of secrets), `secretsChanged`, `triggerRedeploySecrets`
 
 ## Database
 
@@ -259,10 +345,14 @@ curl -X POST http://localhost:5173/api/vault/fetch-test \
 | `src/lib/server/db/schema/pg-schema.ts` | Added vaultConfig table |
 | `src/lib/server/db/drizzle.ts` | vaultConfig export |
 | `src/lib/server/db.ts` | DB functions for Vault + upsertStackEnvVars |
-| `src/lib/server/git.ts` | Vault Sync + triggerRedeploy logic |
+| `src/lib/server/git.ts` | Vault Sync + triggerRedeploy logic + skipVault option |
 | `src/lib/server/secrets-file.ts` | triggerRedeploy parser |
 | `src/lib/server/vault-sync.ts` | Secret change detection |
 | `src/routes/settings/+page.svelte` | Added Vault tab |
+| `src/routes/stacks/+page.svelte` | Added 3 separate sync buttons (Git/Vault/All) |
+| `src/routes/stacks/GitDeployProgressPopover.svelte` | Added mode prop for sync operations |
+| `src/routes/api/git/stacks/[id]/sync/+server.ts` | Added mode parameter (git/vault/all) |
+| `src/lib/config/grid-columns.ts` | Increased stacks actions column width to 250px |
 | `package.json` | node-vault dependency |
 
 ## Security
@@ -285,7 +375,7 @@ curl -X POST http://localhost:5173/api/vault/fetch-test \
 1. Check the path (KV v2 requires `/data/` in the path)
 2. Use the fetch-test endpoint to see available keys:
    ```bash
-   curl -X POST http://localhost:5173/api/vault/fetch-test \
+   curl -X POST http://localhost:3000/api/vault/fetch-test \
      -H "Content-Type: application/json" \
      -d '{"path": "your/path", "keys": ["test"]}'
    ```
